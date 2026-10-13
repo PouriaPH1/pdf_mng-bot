@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Telethon session files
+*.session
+*.session-journal
+
+# Temporary download / cache files
+downloads/
+temp/
+*.pdf
+*.jpg
+*.jpeg
+*.png
+
+# Environment
+.env
