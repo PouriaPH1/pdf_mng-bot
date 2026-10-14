@@ -12,6 +12,31 @@ from utils import (
     apply_watermark_to_pdf,
     remove_watermark_clean
 )
+from FastTelethon import upload_file as fast_upload_file, download_file as fast_download_file
+
+
+async def download_pdf_fast(client_instance, message, target_path: str):
+    """دانلود موازی و بسیار سریع با FastTelethon با پشتیبانی از فال‌بک امن"""
+    try:
+        with open(target_path, "wb") as out:
+            await fast_download_file(client_instance, message.document, out)
+    except Exception as e:
+        if os.path.exists(target_path):
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+        await message.download_media(target_path)
+
+
+async def upload_pdf_fast(client_instance, file_path: str):
+    """آپلود موازی چندبخشی و فوق‌سریع با FastTelethon"""
+    try:
+        with open(file_path, "rb") as f:
+            return await fast_upload_file(client_instance, f)
+    except Exception as e:
+        return file_path
+
 
 # ساخت پوشه فایل‌های موقت
 os.makedirs(config.TEMP_DIR, exist_ok=True)
@@ -356,7 +381,8 @@ async def incoming_messages_handler(event):
         status_msg = await event.reply("📥 در حال دریافت فایل PDF...")
 
         try:
-            await event.download_media(raw_pdf_path)
+            # دانلود چندکاناله و فوق‌سریع با FastTelethon
+            await download_pdf_fast(client, event.message, raw_pdf_path)
             current_pdf = raw_pdf_path
 
             # گام ۱: حذف واترمارک‌های قبلی (در صورت فعال بودن)
@@ -390,12 +416,14 @@ async def incoming_messages_handler(event):
                 generate_pdf_thumbnail(current_pdf, auto_thumb_path)
                 actual_thumb = auto_thumb_path
 
-            # گام ۴: ارسال فایل نهایی
+            # گام ۴: آپلود چندکاناله و فوق‌سریع با FastTelethon و ارسال فایل نهایی
             caption = event.text or ""
-            await status_msg.edit("🚀 در حال آپلود و ارسال نسخه نهایی...")
+            await status_msg.edit("🚀 در حال آپلود فوق‌سریع و ارسال نسخه نهایی...")
+            
+            uploaded_file = await upload_pdf_fast(client, current_pdf)
             await client.send_file(
                 event.chat_id,
-                file=current_pdf,
+                file=uploaded_file,
                 thumb=actual_thumb,
                 caption=caption,
                 force_document=True,
