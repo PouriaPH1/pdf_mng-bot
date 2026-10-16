@@ -63,8 +63,20 @@ state = {
     "remove_wm_enabled": False,       # حذف لوگوها و واترمارک‌های تکراری موجود در فایل
     "remove_wm_text": None,           # متن یا آیدی خاص برای حذف از صفحات (مثل @channel)
 
+    # ۴. تنظیمات تغییر نام فایل‌های PDF
+    "rename_mode": "original",        # "original", "custom", "prefix", "suffix", "remove"
+    "rename_value": None,            # مقدار متنی (مثلاً نام جدید، پیشوند، پسوند، یا عبارت حذفی)
+
     # وضعیت موقت ثبت مدیا و ورودی‌ها
-    "waiting_for": None               # "custom_thumb", "watermark_logo", "remove_text"
+    "waiting_for": None               # "custom_thumb", "watermark_logo", "remove_text", "rename_value"
+}
+
+RENAME_LABELS = {
+    "original": "حفظ نام اصلی ➖",
+    "custom": "نام دلخواه ✍️",
+    "prefix": "افزودن پیشوند ◀️",
+    "suffix": "افزودن پسوند ▶️",
+    "remove": "حذف عبارت از نام ✂️"
 }
 
 POS_LABELS = {
@@ -87,9 +99,37 @@ PAGE_LABELS = {
 # دکمه‌های ثابت در پایین صفحه (Reply Markup)
 MAIN_REPLY_KEYBOARD = [
     [Button.text("🖼 تنظیمات تامبنیل", resize=True), Button.text("🏷 درج واترمارک", resize=True)],
-    [Button.text("🧹 حذف واترمارک قبلی", resize=True), Button.text("⚡ وضعیت کلی و راهنما", resize=True)],
-    [Button.text("🗑 پاکسازی فایل‌های موقت", resize=True)]
+    [Button.text("🧹 حذف واترمارک قبلی", resize=True), Button.text("✏️ تغییر نام فایل", resize=True)],
+    [Button.text("⚡ وضعیت کلی و راهنما", resize=True), Button.text("🗑 پاکسازی فایل‌های موقت", resize=True)]
 ]
+
+# تابع محاسبه و تولید نام جدید فایل
+def calculate_target_filename(original_file_name: str) -> str:
+    raw_name = original_file_name or "document.pdf"
+    base, ext = os.path.splitext(raw_name)
+    if not ext:
+        ext = ".pdf"
+
+    mode = state.get("rename_mode", "original")
+    val = state.get("rename_value")
+
+    if not val or mode == "original":
+        return f"{base}{ext}"
+
+    if mode == "custom":
+        clean_val = val[:-4] if val.lower().endswith(".pdf") else val
+        return f"{clean_val}{ext}"
+    elif mode == "prefix":
+        return f"{val}{base}{ext}"
+    elif mode == "suffix":
+        return f"{base}{val}{ext}"
+    elif mode == "remove":
+        cleaned_base = base.replace(val, "").strip()
+        if not cleaned_base:
+            cleaned_base = "document"
+        return f"{cleaned_base}{ext}"
+
+    return f"{base}{ext}"
 
 # ۱. دکمه‌های شیشه‌ای تنظیمات تامبنیل
 def get_thumb_inline_keyboard():
@@ -139,6 +179,19 @@ def get_remove_wm_inline_keyboard():
         buttons.append([Button.inline("❌ پاک کردن متن حذفی", b"clear_remove_text")])
     return buttons
 
+# ۴. دکمه‌های شیشه‌ای تغییر نام فایل
+def get_rename_inline_keyboard():
+    mode_text = RENAME_LABELS.get(state["rename_mode"], "حفظ نام اصلی")
+    val_text = state["rename_value"] or "تعیین نشده ➖"
+
+    buttons = [
+        [Button.inline(f"⚙️ حالت تغییر نام: {mode_text}", b"cycle_rename_mode")],
+    ]
+    if state["rename_mode"] != "original":
+        buttons.append([Button.inline(f"📝 مقدار/عبارت: {val_text}", b"req_rename_val")])
+        buttons.append([Button.inline("🔄 بازگشت به نام اصلی", b"reset_rename")])
+    return buttons
+
 
 # ==================== هندلر دستور /start ====================
 
@@ -150,7 +203,8 @@ async def start_handler(event):
         "🛠 **امکانات کلیدی:**\n"
         "1️⃣ **تنظیم تامبنیل (کاور):** خودکار از صفحه اول یا تصویر دلخواه (تکی و گروهی).\n"
         "2️⃣ **درج لوگو / واترمارک:** در گوشه‌ها و حاشیه‌های امن (با تضمین عدم تداخل با متن).\n"
-        "3️⃣ **حذف اصولی واترمارک:** پاکسازی لوگوهای تکراری و متن‌های مزاحم (آیدی، نام سایت و...) بدون افت کیفیت.\n\n"
+        "3️⃣ **حذف اصولی واترمارک:** پاکسازی لوگوهای تکراری و متن‌های مزاحم (آیدی، نام سایت و...) بدون افت کیفیت.\n"
+        "4️⃣ **تغییر نام فایل:** تنظیم نام دلخواه، افزودن پیشوند/پسوند (مثل آیدی کانال) یا پاکسازی نام فایل.\n\n"
         "👇 از دکمه‌های زیر جهت تنظیم هر بخش استفاده کنید:"
     )
     await event.respond(welcome_text, buttons=MAIN_REPLY_KEYBOARD)
@@ -160,7 +214,7 @@ async def start_handler(event):
 # ==================== پردازش دکمه‌های ثابت پایین ====================
 
 @client.on(events.NewMessage(func=lambda e: e.is_private and e.text in [
-    "🖼 تنظیمات تامبنیل", "🏷 درج واترمارک", "🧹 حذف واترمارک قبلی", "⚡ وضعیت کلی و راهنما", "🗑 پاکسازی فایل‌های موقت"
+    "🖼 تنظیمات تامبنیل", "🏷 درج واترمارک", "🧹 حذف واترمارک قبلی", "✏️ تغییر نام فایل", "⚡ وضعیت کلی و راهنما", "🗑 پاکسازی فایل‌های موقت"
 ]))
 async def reply_markup_handler(event):
     state["waiting_for"] = None
@@ -180,18 +234,30 @@ async def reply_markup_handler(event):
             buttons=get_remove_wm_inline_keyboard()
         )
 
+    elif text == "✏️ تغییر نام فایل":
+        await event.respond(
+            "✏️ **تنظیمات تغییر نام فایل‌های PDF:**\n\n"
+            "• **نام دلخواه:** قرار دادن یک نام ثابت روی فایل‌های ارسالی.\n"
+            "• **افزودن پیشوند / پسوند:** درج خودکار آیدی کانال یا متن در اول یا آخر نام فایل‌ها.\n"
+            "• **حذف عبارت:** پاکسازی خودکار آیدی یا کلمات تبلیغاتی از نام اصلی فایل.",
+            buttons=get_rename_inline_keyboard()
+        )
+
     elif text == "⚡ وضعیت کلی و راهنما":
         thumb_mode_fa = "🟢 خودکار (صفحه اول)" if state["thumb_mode"] == "auto" else "🔵 عکس دلخواه"
         wm_status_fa = "روشن ✅" if state["watermark_enabled"] else "خاموش ❌"
         rm_status_fa = "روشن ✅" if state["remove_wm_enabled"] else "خاموش ❌"
         pos_fa = POS_LABELS.get(state["watermark_pos"], state["watermark_pos"])
+        rename_fa = RENAME_LABELS.get(state["rename_mode"], "حفظ نام اصلی")
+        rename_val_fa = f" (`{state['rename_value']}`)" if state["rename_value"] and state["rename_mode"] != "original" else ""
         
         info_text = (
             "⚙️ **وضعیت فعلی بخش‌های ربات:**\n\n"
             f"1️⃣ **تامبنیل:** {thumb_mode_fa}\n"
             f"2️⃣ **درج لوگو:** {wm_status_fa} (موقعیت: {pos_fa})\n"
             f"3️⃣ **حذف واترمارک قبلی:** {rm_status_fa}\n"
-            f"   • متن حذفی: `{state['remove_wm_text'] or 'ندارد'}`\n\n"
+            f"   • متن حذفی: `{state['remove_wm_text'] or 'ندارد'}`\n"
+            f"4️⃣ **تغییر نام فایل:** {rename_fa}{rename_val_fa}\n\n"
             "📥 **ارسال فایل:** هر تعداد فایل PDF بفرستید، طبق این تنظیمات پردازش و بازگردانده می‌شوند."
         )
         await event.respond(info_text)
@@ -310,13 +376,41 @@ async def inline_callback_handler(event):
         await event.edit(buttons=get_remove_wm_inline_keyboard())
         await event.answer("متن حذفی پاک شد.")
 
+    # --- تغییر نام فایل ---
+    elif data == "cycle_rename_mode":
+        modes = ["original", "custom", "prefix", "suffix", "remove"]
+        curr_idx = modes.index(state["rename_mode"]) if state["rename_mode"] in modes else 0
+        state["rename_mode"] = modes[(curr_idx + 1) % len(modes)]
+
+        if state["rename_mode"] != "original" and not state["rename_value"]:
+            state["waiting_for"] = "rename_value"
+            await event.edit(buttons=get_rename_inline_keyboard())
+            mode_desc = RENAME_LABELS.get(state["rename_mode"])
+            await event.respond(f"✍️ لطفاً مقدار مورد نظر برای **{mode_desc}** را بفرستید (مثلاً: `@MyChannel`):")
+            return
+
+        await event.edit(buttons=get_rename_inline_keyboard())
+        await event.answer(f"حالت: {RENAME_LABELS.get(state['rename_mode'])}")
+
+    elif data == "req_rename_val":
+        state["waiting_for"] = "rename_value"
+        mode_desc = RENAME_LABELS.get(state["rename_mode"])
+        await event.respond(f"✍️ لطفاً مقدار جدید برای **{mode_desc}** را بفرستید:")
+        await event.answer()
+
+    elif data == "reset_rename":
+        state["rename_mode"] = "original"
+        state["rename_value"] = None
+        await event.edit(buttons=get_rename_inline_keyboard())
+        await event.answer("تنظیمات تغییر نام ریست شد و نام اصلی حفظ می‌شود.")
+
 
 # ==================== دریافت متن، عکس و PDF ====================
 
 @client.on(events.NewMessage)
 async def incoming_messages_handler(event):
     if event.raw_text.startswith("/") or event.text in [
-        "🖼 تنظیمات تامبنیل", "🏷 درج واترمارک", "🧹 حذف واترمارک قبلی", "⚡ وضعیت کلی و راهنما", "🗑 پاکسازی فایل‌های موقت"
+        "🖼 تنظیمات تامبنیل", "🏷 درج واترمارک", "🧹 حذف واترمارک قبلی", "✏️ تغییر نام فایل", "⚡ وضعیت کلی و راهنما", "🗑 پاکسازی فایل‌های موقت"
     ]:
         return
 
@@ -329,6 +423,18 @@ async def incoming_messages_handler(event):
             f"✅ متن حذفی ذخیره شد: `{state['remove_wm_text']}`\n"
             "قابلیت حذف واترمارک فعال شد. از این پس این متن از تمام صفحات PDFهای ارسالی حذف می‌شود.",
             buttons=get_remove_wm_inline_keyboard()
+        )
+        return
+
+    # ۲. اگر در انتظار دریافت مقدار تغییر نام فایل باشیم
+    if state["waiting_for"] == "rename_value" and event.raw_text:
+        state["rename_value"] = event.raw_text.strip()
+        state["waiting_for"] = None
+        mode_desc = RENAME_LABELS.get(state["rename_mode"])
+        await event.reply(
+            f"✅ مقدار تغییر نام ذخیره شد: `{state['rename_value']}`\n"
+            f"حالت فعال: **{mode_desc}**",
+            buttons=get_rename_inline_keyboard()
         )
         return
 
@@ -421,13 +527,14 @@ async def incoming_messages_handler(event):
             await status_msg.edit("🚀 در حال آپلود فوق‌سریع و ارسال نسخه نهایی...")
             
             uploaded_file = await upload_pdf_fast(client, current_pdf)
+            final_filename = calculate_target_filename(file_name)
             await client.send_file(
                 event.chat_id,
                 file=uploaded_file,
                 thumb=actual_thumb,
                 caption=caption,
                 force_document=True,
-                attributes=[DocumentAttributeFilename(file_name or "document.pdf")]
+                attributes=[DocumentAttributeFilename(final_filename)]
             )
 
             await status_msg.delete()
